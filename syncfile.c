@@ -1,8 +1,8 @@
 /*
  * syncfile - sync between two files
  *
- * @(#) $Revision: 1.4 $
- * @(#) $Id: syncfile.c,v 1.4 2003/03/06 10:43:30 chongo Exp chongo $
+ * @(#) $Revision: 1.5 $
+ * @(#) $Id: syncfile.c,v 1.5 2003/03/10 19:41:30 chongo Exp chongo $
  * @(#) $Source: /usr/local/src/cmd/syncfile/RCS/syncfile.c,v $
  *
  * Copyright (c) 2003 by Landon Curt Noll.  All Rights Reserved.
@@ -54,6 +54,7 @@ static int fork_flag = 0;	/* 1 ==> fork into background at start */
 static int verbose = 0;		/* output verbose messages */
 static int del_dest = 0;	/* 1 ==> delete dest is src file is gone */
 static int del_src = 0;		/* 1 ==> delete src is dest file is gone */
+static int trunc = 0;		/* 1 ==> touch/truncate instead deleting */
 static int dest_2_src = 0;	/* 1 ==> copy dest to src if dest is newer */
 static double interval = 60.0;	/* seconds between checks */
 static int64_t count = 1;	/* number of checks, 0 ==> infinite */
@@ -68,8 +69,8 @@ static uid_t uid;		/* 0 ==> we are the superuser, can chown */
  */
 static char *program;		/* our name */
 static char *cmdline =
-    "[-f] [-h] [-v] [-d] [-D] [-c] [-b] [-t secs] [-n numtry]\n"
-    "\t[-s suffix] src dest\n"
+    "[-f] [-h] [-v] [-d] [-D] [-T] [-c] [-b] [-t secs] [-n numtry]\n"
+    "\t[-n numtry] [-s suffix] src dest\n"
     "\n"
     "\t-h\t   print this message\n"
     "\t-v\t   output progress messages to stdout\n"
@@ -78,6 +79,7 @@ static char *cmdline =
     "\n"
     "\t-d\t   delete dest when src file does not exist\n"
     "\t-D\t   delete src when dest file does not exist\n"
+    "\t-T\t   create/truncate files if one file is missing\n"
     "\n"
     "\t-b\t   copy dest to src if dest is newer or src is gone (def: don't)\n"
     "\n"
@@ -123,8 +125,13 @@ main(int argc, char *argv[])
 	debug("sync to: %s", dest);
 	debug("check interval: %f sec", interval);
 	debug("number of checks: %d", count);
-	debug("ok to delete dest: %d", del_dest);
-	debug("ok to delete src: %d", del_src);
+	if (trunc) {
+	    debug("truncate dest if src is missing: %d", del_dest);
+	    debug("truncate src if dest is missing: %d", del_src);
+	} else {
+	    debug("delete dest if src is missing: %d", del_dest);
+	    debug("delete src if dest is missing: %d", del_src);
+	}
 	debug("new dest file suffux: %s", suffix);
 	if (uid == 0) {
 	    debug("will also set ownership and group of file");
@@ -209,7 +216,7 @@ main(int argc, char *argv[])
 	 * cannot move the file between a stat and and open.  We also
 	 * use sendfile which needs at least the src file descriptor.
 	 */
-	src_fd = open(src, O_RDONLY);
+	src_fd = open(src, O_RDWR);
 	if (src_fd < 0) {
 	    if (access(src, F_OK) == 0) {
 		debug("src exists but is not readable: %s", src);
@@ -232,7 +239,7 @@ main(int argc, char *argv[])
 		debug("src file exists: %s", src);
 	    }
 	}
-	dest_fd = open(dest, O_RDONLY);
+	dest_fd = open(dest, O_RDWR);
 	if (dest_fd < 0) {
 	    if (access(dest, F_OK) == 0) {
 		debug("dest exists but is not readable: %s", dest);
@@ -256,7 +263,7 @@ main(int argc, char *argv[])
 	    }
 	}
 
-	/* nothing to do if both files are missing */
+	/* nothing to do if both files are missing, unless -T */
 	if (!src_exists && !dest_exists) {
 	    debug("both src and dest are missing");
 	    continue;
@@ -274,6 +281,7 @@ main(int argc, char *argv[])
 
 	/* deal with a missing src file */
 	if (!src_exists) {
+
 	    /* remove dest if src is missing and -d */
 	    if (del_dest) {
 		debug("src is missing and -d was given");
@@ -284,21 +292,67 @@ main(int argc, char *argv[])
 		} else {
 		    debug("removed dest: %s", dest);
 		}
-	    /* no src and no -d, so nothing to do */
+
+	    /* touch / truncate both files if -T (src is missing) */
+	    } else if (trunc) {
+		if (ftruncate(dest_fd, (off_t)0) < 0) {
+		    debug("unable to truncate dest: %s: %s",
+			  dest, strerror(errno));
+		} else {
+		    debug("truncated dest: %s", dest);
+		    errno = 0;
+		    src_fd = open(src, O_RDWR|O_CREAT|O_TRUNC,
+			    	  dest_buf.st_mode);
+		    if (src_fd < 0) {
+			debug("unable to create empty src: %s: %s",
+			      src, strerror(errno));
+		    } else {
+			debug("created empty src: %s", src);
+		    }
+		}
+
+	    /* no src and no -d and no -T, so nothing to do */
 	    } else {
 		debug("src is missing");
 	    }
 	    continue;
 	}
 
-	/* remove src if dest is missing and -D */
-	if (!dest_exists && del_src) {
-	    debug("dest is missing and -D was given");
-	    errno = 0;
-	    if (unlink(src) < 0) {
-		debug("unable to remove src: %s: %s", src, strerror(errno));
+	/* deal with a missing dest file */
+	if (!dest_exists) {
+
+	    /* remove src if dest is missing and -D */
+	    if (del_src) {
+		debug("dest is missing and -D was given");
+		errno = 0;
+		if (unlink(src) < 0) {
+		    debug("unable to remove src: %s: %s",
+			  src, strerror(errno));
+		} else {
+		    debug("removed src: %s", src);
+		}
+
+	    /* touch / truncate both files if -T and dest is missing */
+	    } else if (trunc) {
+		if (ftruncate(src_fd, (off_t)0) < 0) {
+		    debug("unable to truncate src: %s: %s",
+			  src, strerror(errno));
+		} else {
+		    debug("truncated src: %s", src);
+		    errno = 0;
+		    dest_fd = open(dest, O_RDWR|O_CREAT|O_TRUNC,
+				   src_buf.st_mode);
+		    if (dest_fd < 0) {
+			debug("unable to create empty dest: %s: %s",
+			      dest, strerror(errno));
+		    } else {
+			debug("created empty dest: %s", dest);
+		    }
+		}
+
+	    /* no dest and no -D and no -T, so nothing to do */
 	    } else {
-		debug("removed src: %s", src);
+		debug("dest is missing");
 	    }
 	    continue;
 	}
@@ -366,7 +420,7 @@ parse_args(int argc, char *argv[])
      * parse command flags
      */
     program = argv[0];
-    while ((i = getopt(argc, argv, "fhvdDbt:n:s:")) != -1) {
+    while ((i = getopt(argc, argv, "fhvdDTbt:n:s:")) != -1) {
 	switch (i) {
 	case 'f':	/* fork info background */
 	    fork_flag = 1;
@@ -383,6 +437,9 @@ parse_args(int argc, char *argv[])
 	    break;
 	case 'D':	/* delete src when dest file does not exist */
 	    del_src = 1;
+	    break;
+	case 'T':	/* truncate/touch both files of one file is missing */
+	    trunc = 1;
 	    break;
 	case 'b':	/* cp dest to src if dest is newer */
 	    dest_2_src = 1;
@@ -427,6 +484,10 @@ parse_args(int argc, char *argv[])
 	    exit(9);
 	}
     }
+    if (trunc && (del_dest || del_src)) {
+	fprintf(stderr, "%s: -T conflicts with -d and -D", program);
+	exit(10);
+    }
 
     /*
      * parse flags
@@ -434,7 +495,7 @@ parse_args(int argc, char *argv[])
     if (optind+2 != argc) {
 	fprintf(stderr, "%s: required to args are missing\n", program);
 	fprintf(stderr, "usage: %s %s\n", program, cmdline);
-	exit(10);
+	exit(11);
     } else {
 	src = argv[optind];
 	dest = argv[optind+1];
@@ -555,11 +616,11 @@ copy_file(int from_fd, struct stat *src_buf, char *from, char *new_to, char *to)
      */
     if (from_fd < 0) {
 	fprintf(stderr, "%s: copy_file from_fd < 0: %d\n", program, from_fd);
-	exit(11);
+	exit(12);
     }
     if (src_buf == NULL || from == NULL || new_to == NULL || to == NULL) {
 	fprintf(stderr, "%s: called with NULL ptr\n", program);
-	exit(12);
+	exit(13);
     }
 
     /*
