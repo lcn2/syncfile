@@ -3,9 +3,9 @@
 #
 # syncfile - sync between two files
 #
-# @(#) $Revision: 1.1 $
-# @(#) $Id: Makefile,v 1.1 2003/03/06 08:24:07 chongo Exp chongo $
-# @(#) $Source: /var/tmp/syncfile/RCS/Makefile,v $
+# @(#) $Revision: 1.2 $
+# @(#) $Id: Makefile,v 1.2 2003/03/06 10:21:49 chongo Exp chongo $
+# @(#) $Source: /usr/local/src/cmd/syncfile/RCS/Makefile,v $
 #
 # Copyright (c) 2003 by Landon Curt Noll.  All Rights Reserved.
 #
@@ -84,4 +84,4 @@ clobber quick_clobber: clean
 	rm -f ${TARGETS}
 
 install: all
-	@${INSTALL} -m 0555 ${TARGETS} ${DESTDIR}
+	${INSTALL} -m 0555 ${TARGETS} ${DESTDIR}
