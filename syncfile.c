@@ -1,8 +1,8 @@
 /*
  * syncfile - sync between two files
  *
- * @(#) $Revision: 1.2 $
- * @(#) $Id: syncfile.c,v 1.2 2003/03/06 10:22:07 chongo Exp chongo $
+ * @(#) $Revision: 1.3 $
+ * @(#) $Id: syncfile.c,v 1.3 2003/03/06 10:32:09 chongo Exp $
  * @(#) $Source: /usr/local/src/cmd/syncfile/RCS/syncfile.c,v $
  *
  * Copyright (c) 2003 by Landon Curt Noll.  All Rights Reserved.
@@ -178,10 +178,15 @@ main(int argc, char *argv[])
 	 */
 	src_fd = open(src, O_RDONLY);
 	if (src_fd < 0) {
-	    /* no such file */
-	    src_exists = 0;
-	    memset(&src_buf, 0, sizeof(src_buf));
-	    debug("src file is missing: %s", src);
+	    if (access(src, F_OK) == 0) {
+		debug("src exists but is not readable: %s", src);
+		continue;
+	    } else {
+		/* no such file */
+		src_exists = 0;
+		memset(&src_buf, 0, sizeof(src_buf));
+		debug("src file is missing: %s", src);
+	    }
 	} else {
 	    src_exists = 1;
 	    if (fstat(src_fd, &src_buf) < 0) {
@@ -194,12 +199,17 @@ main(int argc, char *argv[])
 		debug("src file exists: %s", src);
 	    }
 	}
-	dest_fd = open(dest, O_RDWR);
+	dest_fd = open(dest, O_RDONLY);
 	if (dest_fd < 0) {
-	    /* no such file */
-	    dest_exists = 0;
-	    memset(&dest_buf, 0, sizeof(dest_buf));
-	    debug("dest file is missing: %s", dest);
+	    if (access(dest, F_OK) == 0) {
+		debug("dest exists but is not readable: %s", dest);
+		continue;
+	    } else {
+		/* no such file */
+		dest_exists = 0;
+		memset(&dest_buf, 0, sizeof(dest_buf));
+		debug("dest file is missing: %s", dest);
+	    }
 	} else {
 	    dest_exists = 1;
 	    if (fstat(dest_fd, &dest_buf) < 0) {
@@ -212,7 +222,6 @@ main(int argc, char *argv[])
 		debug("dest file exists: %s", dest);
 	    }
 	}
-
 
 	/* nothing to do if both files are missing */
 	if (!src_exists && !dest_exists) {
@@ -533,75 +542,79 @@ copy_file(int from_fd, struct stat *src_buf, char *from, char *new_to, char *to)
      */
     offset = 0;
     count = (off_t)src_buf->st_size;
-    debug("copying %lld octets %s ==> %s", (long long)count, from, new_to);
-    do {
+    if (count > 0) {
+	debug("copying %lld octets %s ==> %s", (long long)count, from, new_to);
+	do {
 #if defined(HAVE_SENDFILE)
-	/*
-	 * transfer by sendfile
-	 */
-	errno = 0;
-	written = sendfile(to_fd, from_fd, &offset, count);
-
-	/* transfer failed, EINTR is the only OK error */
-	if (written < 0 && errno != EINTR) {
-	    debug("sendfile %s to %s failed: %s",
-		  from, new_to, strerror(errno));
-	    (void) close(to_fd);
-	    (void) unlink(new_to);
-	    return;
-	} else if (written == 0) {
-	    debug("sendfile transfered 0 octets");
-	    (void) close(to_fd);
-	    (void) unlink(new_to);
-	    return;
-	}
-
-	/* determine next count needed, if any */
-	count = src_buf->st_size - offset;
-#else
-	/*
-	 * transfer by read/write buffer
-	 */
-	written = 0;
-	errno = 0;
-	/* read a buffer */
-	readcnt = read(from_fd, buf, BUFSIZ);
-	if (readcnt < 0) {
-	    /* EINTR is the only OK error */
-	    if (errno != EINTR) {
-		debug("bad read from %s: %s", from, strerror(errno));
-		(void) close(to_fd);
-		(void) unlink(new_to);
-		return;
-	    }
-	} else if (readcnt == 0) {
-	    debug("empty read from %s: %s", from, strerror(errno));
-	    (void) close(to_fd);
-	    (void) unlink(new_to);
-	    return;
-
-	/* write the same buffer */
-	} else if (readcnt > 0) {
+	    /*
+	     * transfer by sendfile
+	     */
 	    errno = 0;
-	    written = write(to_fd, buf, readcnt);
-	    if (written < 0) {
-		debug("bad write to %s: %s", new_to, strerror(errno));
+	    written = sendfile(to_fd, from_fd, &offset, count);
+
+	    /* transfer failed, EINTR is the only OK error */
+	    if (written < 0 && errno != EINTR) {
+		debug("sendfile %s to %s failed: %s",
+		      from, new_to, strerror(errno));
 		(void) close(to_fd);
 		(void) unlink(new_to);
 		return;
-	    } else if (written != readcnt) {
-		debug("wrote only %d out of %s to %s: %s",
-		      written, readcnt, new_to, strerror(errno));
+	    } else if (written == 0) {
+		debug("sendfile transfered 0 octets");
 		(void) close(to_fd);
 		(void) unlink(new_to);
 		return;
 	    }
-	}
 
-	/* note how much data is left to transfer */
-	count -= written;
+	    /* determine next count needed, if any */
+	    count = src_buf->st_size - offset;
+#else
+	    /*
+	     * transfer by read/write buffer
+	     */
+	    written = 0;
+	    errno = 0;
+	    /* read a buffer */
+	    readcnt = read(from_fd, buf, BUFSIZ);
+	    if (readcnt < 0) {
+		/* EINTR is the only OK error */
+		if (errno != EINTR) {
+		    debug("bad read from %s: %s", from, strerror(errno));
+		    (void) close(to_fd);
+		    (void) unlink(new_to);
+		    return;
+		}
+	    } else if (readcnt == 0) {
+		debug("empty read from %s: %s", from, strerror(errno));
+		(void) close(to_fd);
+		(void) unlink(new_to);
+		return;
+
+	    /* write the same buffer */
+	    } else if (readcnt > 0) {
+		errno = 0;
+		written = write(to_fd, buf, readcnt);
+		if (written < 0) {
+		    debug("bad write to %s: %s", new_to, strerror(errno));
+		    (void) close(to_fd);
+		    (void) unlink(new_to);
+		    return;
+		} else if (written != readcnt) {
+		    debug("wrote only %d out of %s to %s: %s",
+			  written, readcnt, new_to, strerror(errno));
+		    (void) close(to_fd);
+		    (void) unlink(new_to);
+		    return;
+		}
+	    }
+
+	    /* note how much data is left to transfer */
+	    count -= written;
 #endif
-    } while (count > 0);
+	} while (count > 0);
+    } else {
+	debug("src is empty, creating empty %s", new_to);
+    }
 
     /*
      * set mode
