@@ -1,9 +1,9 @@
 /*
  * syncfile - sync between two files
  *
- * @(#) $Revision$
- * @(#) $Id$
- * @(#) $Source$
+ * @(#) $Revision: 1.1 $
+ * @(#) $Id: syncfile.c,v 1.1 2003/03/06 08:24:07 chongo Exp chongo $
+ * @(#) $Source: /var/tmp/syncfile/RCS/syncfile.c,v $
  *
  * Copyright (c) 2003 by Landon Curt Noll.  All Rights Reserved.
  *
@@ -37,9 +37,14 @@
 #include <time.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <fcntl.h>
 #include <unistd.h>
 #include <ctype.h>
 #include <stdarg.h>
+#include <string.h>
+#include <utime.h>
+
+#include "have_sendfile.h"
 
 
 /*
@@ -48,13 +53,13 @@
 static int verbose = 0;		/* output verbose messages */
 static int del_dest = 0;	/* 1 ==> delete dest is src file is gone */
 static int del_src = 0;		/* 1 ==> delete src is dest file is gone */
-static int chk_contents = 0;	/* 1 ==> also compare file contents */
 static int dest_2_src = 0;	/* 1 ==> copy dest to src if dest is newer */
 static double interval = 60.0;	/* seconds between checks */
 static int64_t count = 1;	/* number of checks, 0 ==> infinite */
 static char *suffix = ".new";	/* suffix when forming a new dest file */
 static char *src = NULL;	/* src sync file */
 static char *dest = NULL;	/* dest sync file */
+static uid_t uid;		/* 0 ==> we are the superuser, can chown */
 
 
 /*
@@ -64,19 +69,18 @@ static char *program;		/* our name */
 static char *cmdline =
     "[-h] [-v] [-d] [-D] [-c] [-b] [-t secs] [-n numtry] [-s suffix] src dest\n"
     "\n"
-    "\t-h\t\tprint this message\n"
-    "\t-v\t\toutput progress messages to stdout\n"
+    "\t-h\t   print this message\n"
+    "\t-v\t   output progress messages to stdout\n"
     "\n"
-    "\t-d\t\tdelete dest when src file does not exist\n"
-    "\t-D\t\tdelete src when dest file does not exist\n"
+    "\t-d\t   delete dest when src file does not exist\n"
+    "\t-D\t   delete src when dest file does not exist\n"
     "\n"
-    "\t-c\t\tcompare file contents (def: only check mode, mod time, len)\n"
-    "\t-b\t\tcopy dest to src if dest is newer or src is gone (def: don't)\n"
+    "\t-b\t   copy dest to src if dest is newer or src is gone (def: don't)\n"
     "\n"
-    "\t-t secs\tcheck interval (may be a float) (def: 60.0)\n"
-    "\t-n cnt\tnumber of checks, 0 ==> infinite (def: 1)\n"
+    "\t-t secs\t   check interval (may be a float) (def: 60.0)\n"
+    "\t-n cnt\t   number of checks, 0 ==> infinite (def: 1)\n"
     "\n"
-    "\t-s suffix\tfilename suffix when forming new files(def: .new)\n";
+    "\t-s suffix  filename suffix when forming new files(def: .new)\n";
 
 
 /*
@@ -85,36 +89,41 @@ static char *cmdline =
 static void parse_args(int argc, char *argv[]);
 static void dsleep(double timeout);
 static void debug(char *fmt, ...);
-static void copy_file(int dest_fd, char *dest, char *new_src, char *src);
+static void copy_file(int from_fd, struct stat *src_buf,
+		      char *from, char *new_to, char *to);
 
 
 int
 main(int argc, char *argv[])
 {
-    char *new_src = NULL;	/* src.new temp filename */
-    char *new_dest = NULL;		/* dest.new temp filename */
     int64_t cycle_num = 0;	/* next cycle number */
 
     struct stat src_buf;	/* src status */
     int src_exists;		/* 1 ==> src exists, 0 ==> missing */
     int src_fd = -1;		/* open src descriptor or -1 => no file */
+    char *new_src = NULL;	/* src.new temp filename */
 
     struct stat dest_buf;	/* dest status */
     int dest_exists;		/* 1 ==> dest exists, 0 ==> missing */
     int dest_fd = -1;		/* open dest descriptor or -1 => no file */
+    char *new_dest = NULL;	/* dest.new temp filename */
 
     /*
      * parse args
      */
     parse_args(argc, argv);
+    uid = geteuid();
     if (verbose) {
-	debug("sync from: %s to: %s", src, dest);
-	debug("compare file contents: %d", chk_contents);
+	debug("sync from: %s", src);
+	debug("sync to: %s", dest);
 	debug("check interval: %f sec", interval);
 	debug("number of checks: %d", count);
 	debug("ok to delete dest: %d", del_dest);
 	debug("ok to delete src: %d", del_src);
 	debug("new dest file suffux: %s", suffix);
+	if (uid == 0) {
+	    debug("will also set ownership and group of file");
+	}
     }
 
     /*
@@ -126,8 +135,8 @@ main(int argc, char *argv[])
 	exit(1);
     }
     sprintf(new_src, "%s%s", src, suffix);
-    new_src = (char *)malloc(strlen(dest) + strlen(suffix)) + 1;
-    if (dest == NULL) {
+    new_dest = (char *)malloc(strlen(dest) + strlen(suffix)) + 1;
+    if (new_dest == NULL) {
 	fprintf(stderr, "%s: new_dest malloc failed\n", program);
 	exit(2);
     }
@@ -151,8 +160,8 @@ main(int argc, char *argv[])
 
 	/* sleep if not first cycle */
 	if (cycle_num > 0) {
-	    if (inteveral > 0.0) {
-		debug("sleeping for %f seconds", inteveral);
+	    if (interval > 0.0) {
+		debug("sleeping for %f seconds", interval);
 		dsleep(interval);
 	    }
 	    debug("stating cycle %lld", cycle_num);
@@ -185,7 +194,7 @@ main(int argc, char *argv[])
 		debug("src file exists: %s", src);
 	    }
 	}
-	dest_fd = dest(dest, O_RDWR);
+	dest_fd = open(dest, O_RDWR);
 	if (dest_fd < 0) {
 	    /* no such file */
 	    dest_exists = 0;
@@ -207,27 +216,35 @@ main(int argc, char *argv[])
 
 	/* nothing to do if both files are missing */
 	if (!src_exists && !dest_exists) {
-	    debug("both src and dest are missing, doing nothing");
+	    debug("both src and dest are missing");
 	    continue;
 	}
 
 	/* ignore if any existing file is NOT a regular file */
 	if (src_exists && !S_ISREG(src_buf.st_mode)) {
-	    debug("src: %s is not a regular file, doing nothing", src);
+	    debug("src: %s is not a regular file", src);
 	    continue;
 	}
 	if (dest_exists && !S_ISREG(dest_buf.st_mode)) {
-	    debug("dest: %s is not a regular file, doing nothing", dest);
+	    debug("dest: %s is not a regular file", dest);
 	    continue;
 	}
 
-	/* remove dest if src is missing and -d */
-	if (!src_exists && del_dest) {
-	    debug("src is missing and -d was given");
-	    if (unlink(dest) < 0) {
-		debug("unable to remove dest: %s", dest);
+	/* deal with a missing src file */
+	if (!src_exists) {
+	    /* remove dest if src is missing and -d */
+	    if (del_dest) {
+		debug("src is missing and -d was given");
+		errno = 0;
+		if (unlink(dest) < 0) {
+		    debug("unable to remove dest: %s: %s",
+			  dest, strerror(errno));
+		} else {
+		    debug("removed dest: %s", dest);
+		}
+	    /* no src and no -d, so nothing to do */
 	    } else {
-		debug("removed dest: %s", dest);
+		debug("src is missing");
 	    }
 	    continue;
 	}
@@ -235,8 +252,9 @@ main(int argc, char *argv[])
 	/* remove src if dest is missing and -D */
 	if (!dest_exists && del_src) {
 	    debug("dest is missing and -D was given");
-	    if (unlink(dest) < 0) {
-		debug("unable to remove src: %s", src);
+	    errno = 0;
+	    if (unlink(src) < 0) {
+		debug("unable to remove src: %s: %s", src, strerror(errno));
 	    } else {
 		debug("removed src: %s", src);
 	    }
@@ -246,14 +264,14 @@ main(int argc, char *argv[])
 	/* copy src to dest if dest is missing and no -D */
 	if (!dest_exists && !del_src) {
 	    debug("src: %s exists and dest: %s is missing", src, dest);
-	    copy_file(src_fd, src, new_dest, dest);
+	    copy_file(src_fd, &src_buf, src, new_dest, dest);
 	    continue;
 	}
 
 	/* copy dest to src if src is missing and -b and no -d */
 	if (!src_exists && dest_2_src && !del_dest) {
 	    debug("dest: %s exists and src: %s is missing", dest, src);
-	    copy_file(dest_fd, dest, new_src, src);
+	    copy_file(dest_fd, &dest_buf, dest, new_src, src);
 	    continue;
 	}
 
@@ -267,37 +285,16 @@ main(int argc, char *argv[])
 	    debug("src: %s and dest: %s are different", src, dest);
 	    if (dest_2_src && src_buf.st_mtime < dest_buf.st_mtime) {
 		debug("dest: %s is newer, copying to src: %s", dest, src);
-		copy_file(dest_fd, dest, new_src, src);
+		copy_file(dest_fd, &dest_buf, dest, new_src, src);
 	    } else {
 		debug("copying to src: %s to dest: %s", src, dest);
-		copy_file(src_fd, src, new_dest, dest);
-	    }
-	    continue;
-
-	/* same mode,len,mod_time and -a means we compare and copy if diff */
-	} else if (src_exists && dest_exists && chk_contents) {
-	    debug("src: %s and dest: %s look similar, comparing contents",
-		  src, dest);
-	    if (contents_eq(src_fd, dest_fd)) {
-		if (dest_2_src && src_buf.st_mtime < dest_buf.st_mtime) {
-		    debug("dest: %s is newer, copying to src: %s", dest, src);
-		    copy_file(dest_fd, dest, new_src, src);
-		} else {
-		    debug("copying to src: %s to dest: %s", src, dest);
-		    copy_file(src_fd, src, new_dest, dest);
-		}
+		copy_file(src_fd, &src_buf, src, new_dest, dest);
 	    }
 	    continue;
 	}
 
 	/* src and dest must be identical or similar */
-	if (chk_contents) {
-	    debug("src: %s and dest: %s are identical, doing nothing",
-		  src, dest);
-	} else {
-	    debug("src: %s and dest: %s are similar, doing nothing",
-		  src, dest);
-	}
+	debug("src and dest look similar");
 
     } while (count == 0 || cycle_num < count);
 
@@ -327,7 +324,7 @@ parse_args(int argc, char *argv[])
      * parse command flags
      */
     program = argv[0];
-    while ((i = getopt(argc, argv, "hvdDcbt:n:s:")) != -1) {
+    while ((i = getopt(argc, argv, "hvdDbt:n:s:")) != -1) {
 	switch (i) {
 	case 'h':	/* print help message */
 	    fprintf(stderr, "usage: %s %s\n", program, cmdline);
@@ -342,9 +339,6 @@ parse_args(int argc, char *argv[])
 	case 'D':	/* delete src when dest file does not exist */
 	    del_src = 1;
 	    break;
-	case 'c':	/* compare file contents */
-	    chk_contents = 1;
-	    break;
 	case 'b':	/* cp dest to src if dest is newer */
 	    dest_2_src = 1;
 	    break;
@@ -353,11 +347,11 @@ parse_args(int argc, char *argv[])
 	    interval = strtod(optarg, NULL);
 	    if (errno == ERANGE) {
 		fprintf(stderr, "%s: invalid -t interval value\n", program);
-		exit(1);
+		exit(3);
 	    } else if (interval <= 0.0) {
 		fprintf(stderr,
 			"%s: -t interval value must be > 0.0\n", program);
-		exit(2);
+		exit(4);
 	    }
 	    break;
 	case 'n':
@@ -365,10 +359,10 @@ parse_args(int argc, char *argv[])
 	    count = strtoll(optarg, NULL, 0);
 	    if (errno == ERANGE) {
 		fprintf(stderr, "%s: invalid -n count value\n", program);
-		exit(3);
+		exit(5);
 	    } else if (count < 0) {
 		fprintf(stderr, "%s: -n count must be >= 0\n", program);
-		exit(4);
+		exit(6);
 	    }
 	    break;
 	case 's':	/* new file suffix */
@@ -379,13 +373,13 @@ parse_args(int argc, char *argv[])
 		    fprintf(stderr,
 			    "%s: -s suffux must only be [A-Za-z0-9._+,-]\n",
 			    program);
-		    exit(5);
+		    exit(7);
 		}
 	    }
 	    break;
 	default:
 	    fprintf(stderr, "usage: %s %s\n", program, cmdline);
-	    exit(6);
+	    exit(8);
 	}
     }
 
@@ -395,7 +389,7 @@ parse_args(int argc, char *argv[])
     if (optind+2 != argc) {
 	fprintf(stderr, "%s: required to args are missing\n", program);
 	fprintf(stderr, "usage: %s %s\n", program, cmdline);
-	exit(7);
+	exit(9);
     } else {
 	src = argv[optind];
 	dest = argv[optind+1];
@@ -458,7 +452,7 @@ debug(char *fmt, ...)
 
 	/* output debug header */
 	(void) gettimeofday(&now, NULL);
-	fprintf(stdout, "%s: debug: %f: ",
+	fprintf(stdout, "%s:%f: ",
 		program,
 		(double)now.tv_sec + ((double)now.tv_usec / 1000000.0));
 
@@ -484,6 +478,7 @@ debug(char *fmt, ...)
  *
  * given:
  * 	from_fd		open file descriptor to copy from
+ * 	src_buf		pointer to fstat of from_fd
  * 	from		name of file being copied from
  * 	new_to		temp filename in same directory as to
  * 	to		filename being copied into
@@ -497,6 +492,171 @@ debug(char *fmt, ...)
  * to match the from file.
  */
 static void
-copy_file(int from_fd, char *from, char *new_to, char *to)
+copy_file(int from_fd, struct stat *src_buf, char *from, char *new_to, char *to)
 {
+    int to_fd = -1;	/* new_to open file descriptor */
+    off_t offset;	/* starting offset of transfer */
+    size_t count;	/* bytes left to transfer */
+    ssize_t written;	/* bytes written */
+    struct utimbuf timebuf;	/* access and modification time to set */
+#if !defined(HAVE_SENDFILE)
+    int readcnt;	/* bytes read from from */
+    int writecnt;	/* bytes written to to */
+    char buf[BUFSIZ];	/* I/O buffer */
+#endif
+
+    /*
+     * firewall
+     */
+    if (from_fd < 0) {
+	fprintf(stderr, "%s: copy_file from_fd < 0: %d\n", program, from_fd);
+	exit(10);
+    }
+    if (src_buf == NULL || from == NULL || new_to == NULL || to == NULL) {
+	fprintf(stderr, "%s: called with NULL ptr\n", program);
+	exit(11);
+    }
+
+    /*
+     * open the temp from file
+     */
+    debug("opening temp file: %s", new_to);
+    errno = 0;
+    to_fd = open(new_to, O_CREAT|O_EXCL|O_TRUNC|O_WRONLY, src_buf->st_mode);
+    if (to_fd < 0) {
+	debug("unable to open temp file: %s: %s", new_to, strerror(errno));
+	return;
+    }
+
+    /*
+     * send data from the from file to the to file :-)
+     */
+    offset = 0;
+    count = (off_t)src_buf->st_size;
+    debug("copying %lld octets %s ==> %s", (long long)count, from, new_to);
+    do {
+#if defined(HAVE_SENDFILE)
+	/*
+	 * transfer by sendfile
+	 */
+	errno = 0;
+	written = sendfile(to_fd, from_fd, &offset, count);
+
+	/* transfer failed, EINTR is the only OK error */
+	if (written < 0 && errno != EINTR) {
+	    debug("sendfile %s to %s failed: %s",
+		  from, new_to, strerror(errno));
+	    (void) close(to_fd);
+	    (void) unlink(new_to);
+	    return;
+	} else if (written == 0) {
+	    debug("sendfile transfered 0 octets");
+	    (void) close(to_fd);
+	    (void) unlink(new_to);
+	    return;
+	}
+
+	/* determine next count needed, if any */
+	count = src_buf->st_size - offset;
+#else
+	/*
+	 * transfer by read/write buffer
+	 */
+	written = 0;
+	errno = 0;
+	/* read a buffer */
+	readcnt = read(from_fd, buf, BUFSIZ);
+	if (readcnt < 0) {
+	    /* EINTR is the only OK error */
+	    if (errno != EINTR) {
+		debug("bad read from %s: %s", from, strerror(errno));
+		(void) close(to_fd);
+		(void) unlink(new_to);
+		return;
+	    }
+	} else if (readcnt == 0) {
+	    debug("empty read from %s: %s", from, strerror(errno));
+	    (void) close(to_fd);
+	    (void) unlink(new_to);
+	    return;
+
+	/* write the same buffer */
+	} else if (readcnt > 0) {
+	    errno = 0;
+	    written = write(to_fd, buf, readcnt);
+	    if (written < 0) {
+		debug("bad write to %s: %s", new_to, strerror(errno));
+		(void) close(to_fd);
+		(void) unlink(new_to);
+		return;
+	    } else if (written != readcnt) {
+		debug("wrote only %d out of %s to %s: %s",
+		      written, readcnt, new_to, strerror(errno));
+		(void) close(to_fd);
+		(void) unlink(new_to);
+		return;
+	    }
+	}
+
+	/* note how much data is left to transfer */
+	count -= written;
+#endif
+    } while (count > 0);
+    if (offset != src_buf->st_size) {
+	debug("incomplete sendfile transfer");
+	(void) unlink(new_to);
+	return;
+    }
+
+    /*
+     * set mode
+     */
+    errno = 0;
+    if (fchmod(to_fd, src_buf->st_mode) < 0) {
+	debug("cannot chmod %s %03o: %s",
+	      new_to, src_buf->st_mode, strerror(errno));
+	(void) unlink(new_to);
+	return;
+    }
+
+    /*
+     * set ownership and group if we are root
+     */
+    if (uid == 0 && fchown(to_fd, src_buf->st_uid, src_buf->st_gid) < 0) {
+	debug("unable to chown %d.%d of %s: %s",
+	      src_buf->st_uid, src_buf->st_gid, new_to,
+	      strerror(errno));
+	debug("will continue anyway");
+	/* OK to continue */
+    }
+
+    /*
+     * close up the complete and new file
+     */
+    (void) close(to_fd);
+
+    /*
+     * set new file attributes
+     */
+    timebuf.actime = src_buf->st_atime;
+    timebuf.modtime = src_buf->st_mtime;
+    errno = 0;
+    if (utime(new_to, &timebuf) < 0) {
+	debug("unable to set file time on %s: %s", new_to, strerror(errno));
+	(void) unlink(new_to);
+	return;
+    }
+
+    /*
+     * move new file into place
+     */
+    debug("rename %s ==> %s", new_to, to);
+    errno = 0;
+    if (rename(new_to, to) < 0) {
+	debug("move %s to %s failed: %s", new_to, to, strerror(errno));
+	(void) unlink(new_to);
+	return;
+    }
+    debug("completed sync %s ==> %s", from, to);
+    return;
 }
