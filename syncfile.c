@@ -1,9 +1,9 @@
 /*
  * syncfile - sync between two files
  *
- * @(#) $Revision: 1.1 $
- * @(#) $Id: syncfile.c,v 1.1 2003/03/06 08:24:07 chongo Exp chongo $
- * @(#) $Source: /var/tmp/syncfile/RCS/syncfile.c,v $
+ * @(#) $Revision: 1.2 $
+ * @(#) $Id: syncfile.c,v 1.2 2003/03/06 10:22:07 chongo Exp chongo $
+ * @(#) $Source: /usr/local/src/cmd/syncfile/RCS/syncfile.c,v $
  *
  * Copyright (c) 2003 by Landon Curt Noll.  All Rights Reserved.
  *
@@ -602,11 +602,6 @@ copy_file(int from_fd, struct stat *src_buf, char *from, char *new_to, char *to)
 	count -= written;
 #endif
     } while (count > 0);
-    if (offset != src_buf->st_size) {
-	debug("incomplete sendfile transfer");
-	(void) unlink(new_to);
-	return;
-    }
 
     /*
      * set mode
