@@ -1,8 +1,8 @@
 /*
  * syncfile - sync between two files
  *
- * @(#) $Revision: 1.3 $
- * @(#) $Id: syncfile.c,v 1.3 2003/03/06 10:32:09 chongo Exp $
+ * @(#) $Revision: 1.4 $
+ * @(#) $Id: syncfile.c,v 1.4 2003/03/06 10:43:30 chongo Exp chongo $
  * @(#) $Source: /usr/local/src/cmd/syncfile/RCS/syncfile.c,v $
  *
  * Copyright (c) 2003 by Landon Curt Noll.  All Rights Reserved.
@@ -50,6 +50,7 @@
 /*
  * flags
  */
+static int fork_flag = 0;	/* 1 ==> fork into background at start */
 static int verbose = 0;		/* output verbose messages */
 static int del_dest = 0;	/* 1 ==> delete dest is src file is gone */
 static int del_src = 0;		/* 1 ==> delete src is dest file is gone */
@@ -67,10 +68,13 @@ static uid_t uid;		/* 0 ==> we are the superuser, can chown */
  */
 static char *program;		/* our name */
 static char *cmdline =
-    "[-h] [-v] [-d] [-D] [-c] [-b] [-t secs] [-n numtry] [-s suffix] src dest\n"
+    "[-f] [-h] [-v] [-d] [-D] [-c] [-b] [-t secs] [-n numtry]\n"
+    "\t[-s suffix] src dest\n"
     "\n"
     "\t-h\t   print this message\n"
     "\t-v\t   output progress messages to stdout\n"
+    "\n"
+    "\t-f\t   fork into background\n"
     "\n"
     "\t-d\t   delete dest when src file does not exist\n"
     "\t-D\t   delete src when dest file does not exist\n"
@@ -96,6 +100,7 @@ static void copy_file(int from_fd, struct stat *src_buf,
 int
 main(int argc, char *argv[])
 {
+    pid_t pid;			/* pid of child or 0 (parent) or < 0 (error) */
     int64_t cycle_num = 0;	/* next cycle number */
 
     struct stat src_buf;	/* src status */
@@ -127,18 +132,46 @@ main(int argc, char *argv[])
     }
 
     /*
+     * I/O cleanup
+     */
+    fclose(stdin);
+
+    /*
+     * fork into backgrond if needed
+     */
+    if (fork_flag) {
+
+	/* fork me :-) */
+	debug("forking into background, debug disabled on child");
+	errno = 0;
+	pid = fork();
+	if (pid < 0) {
+	    /* bad fork */
+	    fprintf(stderr, "%s: fork failed: %s\n", program, strerror(errno));
+	    exit(1);
+	} else if (pid > 0) {
+	    /* parent code */
+	    debug("forked pid: %d, parent exiting", pid);
+	    exit(0);
+	}
+
+	/* child code from now on */
+	verbose = 0;
+    }
+
+    /*
      * form temp filenames
      */
     new_src = (char *)malloc(strlen(src) + strlen(suffix) + 1);
     if (new_src == NULL) {
 	fprintf(stderr, "%s: new_src malloc failed\n", program);
-	exit(1);
+	exit(2);
     }
     sprintf(new_src, "%s%s", src, suffix);
     new_dest = (char *)malloc(strlen(dest) + strlen(suffix)) + 1;
     if (new_dest == NULL) {
 	fprintf(stderr, "%s: new_dest malloc failed\n", program);
-	exit(2);
+	exit(3);
     }
     sprintf(new_dest, "%s%s", dest, suffix);
 
@@ -333,8 +366,11 @@ parse_args(int argc, char *argv[])
      * parse command flags
      */
     program = argv[0];
-    while ((i = getopt(argc, argv, "hvdDbt:n:s:")) != -1) {
+    while ((i = getopt(argc, argv, "fhvdDbt:n:s:")) != -1) {
 	switch (i) {
+	case 'f':	/* fork info background */
+	    fork_flag = 1;
+	    break;
 	case 'h':	/* print help message */
 	    fprintf(stderr, "usage: %s %s\n", program, cmdline);
 	    exit(0);
@@ -356,11 +392,11 @@ parse_args(int argc, char *argv[])
 	    interval = strtod(optarg, NULL);
 	    if (errno == ERANGE) {
 		fprintf(stderr, "%s: invalid -t interval value\n", program);
-		exit(3);
+		exit(4);
 	    } else if (interval <= 0.0) {
 		fprintf(stderr,
 			"%s: -t interval value must be > 0.0\n", program);
-		exit(4);
+		exit(5);
 	    }
 	    break;
 	case 'n':
@@ -368,10 +404,10 @@ parse_args(int argc, char *argv[])
 	    count = strtoll(optarg, NULL, 0);
 	    if (errno == ERANGE) {
 		fprintf(stderr, "%s: invalid -n count value\n", program);
-		exit(5);
+		exit(6);
 	    } else if (count < 0) {
 		fprintf(stderr, "%s: -n count must be >= 0\n", program);
-		exit(6);
+		exit(7);
 	    }
 	    break;
 	case 's':	/* new file suffix */
@@ -382,13 +418,13 @@ parse_args(int argc, char *argv[])
 		    fprintf(stderr,
 			    "%s: -s suffux must only be [A-Za-z0-9._+,-]\n",
 			    program);
-		    exit(7);
+		    exit(8);
 		}
 	    }
 	    break;
 	default:
 	    fprintf(stderr, "usage: %s %s\n", program, cmdline);
-	    exit(8);
+	    exit(9);
 	}
     }
 
@@ -398,7 +434,7 @@ parse_args(int argc, char *argv[])
     if (optind+2 != argc) {
 	fprintf(stderr, "%s: required to args are missing\n", program);
 	fprintf(stderr, "usage: %s %s\n", program, cmdline);
-	exit(9);
+	exit(10);
     } else {
 	src = argv[optind];
 	dest = argv[optind+1];
@@ -519,11 +555,11 @@ copy_file(int from_fd, struct stat *src_buf, char *from, char *new_to, char *to)
      */
     if (from_fd < 0) {
 	fprintf(stderr, "%s: copy_file from_fd < 0: %d\n", program, from_fd);
-	exit(10);
+	exit(11);
     }
     if (src_buf == NULL || from == NULL || new_to == NULL || to == NULL) {
 	fprintf(stderr, "%s: called with NULL ptr\n", program);
-	exit(11);
+	exit(12);
     }
 
     /*
