@@ -3,9 +3,9 @@
 #
 # syncfile - sync between two files
 #
-# @(#) $Revision: 1.3 $
-# @(#) $Id: Makefile,v 1.3 2003/03/06 10:24:35 chongo Exp chongo $
-# @(#) $Source: /usr/local/src/cmd/syncfile/RCS/Makefile,v $
+# @(#) $Revision: 1.4 $
+# @(#) $Id: Makefile,v 1.4 2003/03/06 10:29:08 chongo Exp root $
+# @(#) $Source: /usr/local/src/bin/syncfile/RCS/Makefile,v $
 #
 # Copyright (c) 2003 by Landon Curt Noll.  All Rights Reserved.
 #
@@ -37,7 +37,7 @@ CC= cc
 CFLAGS= -O3 -g3
 #CFLAGS= -g3
 
-TOPNAME= cmd
+TOPNAME= bin
 INSTALL= install
 
 DESTDIR= /usr/local/bin
