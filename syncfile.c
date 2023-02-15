@@ -5,7 +5,7 @@
  * @(#) $Id: syncfile.c,v 1.6 2003/03/11 01:36:57 chongo Exp $
  * @(#) $Source: /usr/local/src/bin/syncfile/RCS/syncfile.c,v $
  *
- * Copyright (c) 2003 by Landon Curt Noll.  All Rights Reserved.
+ * Copyright (c) 2003,2023 by Landon Curt Noll.  All Rights Reserved.
  *
  * Permission to use, copy, modify, and distribute this software and
  * its documentation for any purpose and without fee is hereby granted,
@@ -43,8 +43,12 @@
 #include <stdarg.h>
 #include <string.h>
 #include <utime.h>
+#include <sys/time.h>
 
 #include "have_sendfile.h"
+#if defined(HAVE_SENDFILE)
+#include <sys/sendfile.h>
+#endif
 
 
 /*
@@ -405,8 +409,8 @@ main(int argc, char *argv[])
  * parse_args - parse command args
  *
  * given:
- * 	argc	number of args to parse
- * 	argv	command arg list
+ *	argc	number of args to parse
+ *	argv	command arg list
  */
 static void
 parse_args(int argc, char *argv[])
@@ -508,7 +512,7 @@ parse_args(int argc, char *argv[])
  * dsleep - sleep for a double number of seconds
  *
  * given:
- * 	timeout		seconds to sleep as a float
+ *	timeout		seconds to sleep as a float
  */
 static void
 dsleep(double timeout)
@@ -544,8 +548,8 @@ dsleep(double timeout)
  * debug - print debug message (if -v) to stdout
  *
  * given:
- * 	fmt	printf-like format of the main part of the debug message
- * 	...	optional debug message args
+ *	fmt	printf-like format of the main part of the debug message
+ *	...	optional debug message args
  */
 static void
 debug(char *fmt, ...)
@@ -583,7 +587,7 @@ debug(char *fmt, ...)
  * copy_file - copy from one file to another in a safe atomic fashion
  *
  * given:
- * 	from_fd		open file descriptor to copy from
+ *	from_fd		open file descriptor to copy from
  * 	src_buf		pointer to fstat of from_fd
  * 	from		name of file being copied from
  * 	new_to		temp filename in same directory as to
