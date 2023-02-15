@@ -3,8 +3,8 @@
 #
 # syncfile - sync between two files
 #
-# @(#) $Revision: 1.4 $
-# @(#) $Id: Makefile,v 1.4 2003/03/06 10:29:08 chongo Exp root $
+# @(#) $Revision: 1.5 $
+# @(#) $Id: Makefile,v 1.5 2015/09/06 06:58:46 root Exp $
 # @(#) $Source: /usr/local/src/bin/syncfile/RCS/Makefile,v $
 #
 # Copyright (c) 2003 by Landon Curt Noll.  All Rights Reserved.

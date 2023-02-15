@@ -1,9 +1,9 @@
 /*
  * syncfile - sync between two files
  *
- * @(#) $Revision: 1.5 $
- * @(#) $Id: syncfile.c,v 1.5 2003/03/10 19:41:30 chongo Exp chongo $
- * @(#) $Source: /usr/local/src/cmd/syncfile/RCS/syncfile.c,v $
+ * @(#) $Revision: 1.6 $
+ * @(#) $Id: syncfile.c,v 1.6 2003/03/11 01:36:57 chongo Exp $
+ * @(#) $Source: /usr/local/src/bin/syncfile/RCS/syncfile.c,v $
  *
  * Copyright (c) 2003 by Landon Curt Noll.  All Rights Reserved.
  *

@@ -1,9 +1,9 @@
 /*
  * have_sendfile - determine if we have the sendfile system call
  *
- * @(#) $Revision$
- * @(#) $Id$
- * @(#) $Source$
+ * @(#) $Revision: 1.1 $
+ * @(#) $Id: have_sendfile.c,v 1.1 2003/03/06 08:24:07 chongo Exp $
+ * @(#) $Source: /usr/local/src/bin/syncfile/RCS/have_sendfile.c,v $
  *
  * Copyright (c) 2003 by Landon Curt Noll.  All Rights Reserved.
  *
