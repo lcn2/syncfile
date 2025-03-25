@@ -1,2 +1,4 @@
 have_sendfile.h
 syncfile
+syncfile.dSYM
+syncfile.o

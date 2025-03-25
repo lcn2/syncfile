@@ -1,11 +1,7 @@
 /*
  * syncfile - sync between two files
  *
- * @(#) $Revision: 1.6 $
- * @(#) $Id: syncfile.c,v 1.6 2003/03/11 01:36:57 chongo Exp $
- * @(#) $Source: /usr/local/src/bin/syncfile/RCS/syncfile.c,v $
- *
- * Copyright (c) 2003,2023 by Landon Curt Noll.  All Rights Reserved.
+ * Copyright (c) 2003,2023,2025 by Landon Curt Noll.  All Rights Reserved.
  *
  * Permission to use, copy, modify, and distribute this software and
  * its documentation for any purpose and without fee is hereby granted,
@@ -25,9 +21,12 @@
  * OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
  *
- * chongo (Landon Curt Noll, http://www.isthe.com/chongo/index.html) /\oo/\
+ * chongo (Landon Curt Noll) /\oo/\
  *
- * Share and enjoy! :-)
+ * http://www.isthe.com/chongo/index.html
+ * https://github.com/lcn2
+ *
+ * Share and Enjoy!     :-)
  */
 
 
@@ -52,6 +51,12 @@
 
 
 /*
+ * official version
+ */
+#define VERSION "1.6.1 2025-03-24"          /* format: major.minor YYYY-MM-DD */
+
+
+/*
  * flags
  */
 static int fork_flag = 0;	/* 1 ==> fork into background at start */
@@ -71,31 +76,44 @@ static uid_t uid;		/* 0 ==> we are the superuser, can chown */
 /*
  * usage
  */
-static char *program;		/* our name */
-static char *cmdline =
-    "[-f] [-h] [-v] [-d] [-D] [-T] [-c] [-b] [-t secs] [-n numtry]\n"
-    "\t[-n numtry] [-s suffix] src dest\n"
+static char *program = NULL;		/* our name */
+static char *prog = NULL;		/* basename of our name */
+static const char * const usage =
+    "usage: %s [-h] [-v] [-V] [-f] [-d] [-D] [-T] [-c] [-t secs] [-n cnt] [-s suffix] src dest\n"
     "\n"
     "\t-h\t   print this message\n"
     "\t-v\t   output progress messages to stdout\n"
+    "\t-V\t   print version string and exit\n"
     "\n"
     "\t-f\t   fork into background\n"
     "\n"
     "\t-d\t   delete dest when src file does not exist\n"
     "\t-D\t   delete src when dest file does not exist\n"
-    "\t-T\t   create/truncate files if one file is missing\n"
+    "\t-T\t   create/truncate files if one file is missing (conflicts with -d and -D)\n"
     "\n"
-    "\t-b\t   copy dest to src if dest is newer or src is gone (def: don't)\n"
+    "\t-c\t   copy dest to src if dest is newer or src is gone (def: don't)\n"
     "\n"
     "\t-t secs\t   check interval (may be a float) (def: 60.0)\n"
     "\t-n cnt\t   number of checks, 0 ==> infinite (def: 1)\n"
     "\n"
-    "\t-s suffix  filename suffix when forming new files(def: .new)\n";
+    "\t-s suffix  filename suffix when forming new files (def: .new)\n"
+    "\n"
+    "\tsrc\t   src file\n"
+    "\tdest\t   destination file\n"
+    "\n"
+    "Exit codes:\n"
+    "    0         all OK\n"
+    "    2         -h and help string printed or -V and version string printed\n"
+    "    3         command line error\n"
+    " >= 10        internal error\n"
+    "\n"
+    "%s version: %s\n";
 
 
 /*
  * forward declarations
  */
+static void pr_usage(FILE *stream);
 static void parse_args(int argc, char *argv[]);
 static void dsleep(double timeout);
 static void debug(char *fmt, ...);
@@ -122,6 +140,7 @@ main(int argc, char *argv[])
     /*
      * parse args
      */
+    program = argv[0];
     parse_args(argc, argv);
     uid = geteuid();
     if (verbose) {
@@ -148,7 +167,7 @@ main(int argc, char *argv[])
     fclose(stdin);
 
     /*
-     * fork into backgrond if needed
+     * fork into background if needed
      */
     if (fork_flag) {
 
@@ -159,11 +178,11 @@ main(int argc, char *argv[])
 	if (pid < 0) {
 	    /* bad fork */
 	    fprintf(stderr, "%s: fork failed: %s\n", program, strerror(errno));
-	    exit(1);
+	    exit(10); /*coo*/
 	} else if (pid > 0) {
 	    /* parent code */
 	    debug("forked pid: %d, parent exiting", pid);
-	    exit(0);
+	    exit(0); /*ooo*/
 	}
 
 	/* child code from now on */
@@ -176,13 +195,13 @@ main(int argc, char *argv[])
     new_src = (char *)malloc(strlen(src) + strlen(suffix) + 1);
     if (new_src == NULL) {
 	fprintf(stderr, "%s: new_src malloc failed\n", program);
-	exit(2);
+	exit(11);
     }
     sprintf(new_src, "%s%s", src, suffix);
     new_dest = (char *)malloc(strlen(dest) + strlen(suffix)) + 1;
     if (new_dest == NULL) {
 	fprintf(stderr, "%s: new_dest malloc failed\n", program);
-	exit(3);
+	exit(12);
     }
     sprintf(new_dest, "%s%s", dest, suffix);
 
@@ -217,7 +236,7 @@ main(int argc, char *argv[])
 	 *
 	 * We use open files because we can fstat the descriptor knowing
 	 * that we are talking about the file that we opened.  I.e., someone
-	 * cannot move the file between a stat and and open.  We also
+	 * cannot move the file between a stat and open.  We also
 	 * use sendfile which needs at least the src file descriptor.
 	 */
 	src_fd = open(src, O_RDWR);
@@ -306,7 +325,7 @@ main(int argc, char *argv[])
 		    debug("truncated dest: %s", dest);
 		    errno = 0;
 		    src_fd = open(src, O_RDWR|O_CREAT|O_TRUNC,
-			    	  dest_buf.st_mode);
+				  dest_buf.st_mode);
 		    if (src_fd < 0) {
 			debug("unable to create empty src: %s: %s",
 			      src, strerror(errno));
@@ -401,7 +420,51 @@ main(int argc, char *argv[])
     /*
      * all done!  -- Jessica Noll, Age 2
      */
-    exit(0);
+    exit(0); /*ooo*/
+}
+
+
+/*
+ * pr_usage - print usage message
+ *
+ * given:
+ *
+ *    stream - print usage message on stream, NULL ==> stderr
+ */
+static void
+pr_usage(FILE *stream)
+{
+    /*
+     * NULL stream means stderr
+     */
+    if (stream == NULL) {
+        stream = stderr;
+    }
+
+    /*
+     * firewall - change program if NULL
+     */
+    if (program == NULL) {
+        program = "((NULL))";
+    }
+
+    /*
+     * firewall set name if NULL
+     */
+    if (prog == NULL) {
+        prog = rindex(program, '/');
+    }
+    /* paranoia if no / is found */
+    if (prog == NULL) {
+        prog = program;
+    } else {
+	++prog;
+    }
+
+    /*
+     * print usage message to stderr
+     */
+    fprintf(stream, usage, program, prog, VERSION);
 }
 
 
@@ -423,18 +486,21 @@ parse_args(int argc, char *argv[])
     /*
      * parse command flags
      */
-    program = argv[0];
-    while ((i = getopt(argc, argv, "fhvdDTbt:n:s:")) != -1) {
+    while ((i = getopt(argc, argv, "hvVfdDTct:n:s:")) != -1) {
 	switch (i) {
-	case 'f':	/* fork info background */
-	    fork_flag = 1;
-	    break;
 	case 'h':	/* print help message */
-	    fprintf(stderr, "usage: %s %s\n", program, cmdline);
-	    exit(0);
+	    pr_usage(stderr);
+	    exit(2); /*ooo*/
 	    /*NOTREACHED*/
 	case 'v':	/* verbose output */
 	    verbose = 1;
+	    break;
+	case 'V':	/* verbose output */
+	    printf("%s\n", VERSION);
+	    exit(2); /*ooo*/
+	    /*NOTREACHED*/
+	case 'f':	/* fork info background */
+	    fork_flag = 1;
 	    break;
 	case 'd':	/* delete dest when src file does not exist */
 	    del_dest = 1;
@@ -445,7 +511,7 @@ parse_args(int argc, char *argv[])
 	case 'T':	/* truncate/touch both files of one file is missing */
 	    trunc = 1;
 	    break;
-	case 'b':	/* cp dest to src if dest is newer */
+	case 'c':	/* cp dest to src if dest is newer */
 	    dest_2_src = 1;
 	    break;
 	case 't':
@@ -453,11 +519,13 @@ parse_args(int argc, char *argv[])
 	    interval = strtod(optarg, NULL);
 	    if (errno == ERANGE) {
 		fprintf(stderr, "%s: invalid -t interval value\n", program);
-		exit(4);
+		exit(3); /*ooo*/
+		/*NOTREACHED*/
 	    } else if (interval <= 0.0) {
 		fprintf(stderr,
 			"%s: -t interval value must be > 0.0\n", program);
-		exit(5);
+		exit(3); /*ooo*/
+		/*NOTREACHED*/
 	    }
 	    break;
 	case 'n':
@@ -465,10 +533,12 @@ parse_args(int argc, char *argv[])
 	    count = strtoll(optarg, NULL, 0);
 	    if (errno == ERANGE) {
 		fprintf(stderr, "%s: invalid -n count value\n", program);
-		exit(6);
+		exit(3); /*ooo*/
+		/*NOTREACHED*/
 	    } else if (count < 0) {
 		fprintf(stderr, "%s: -n count must be >= 0\n", program);
-		exit(7);
+		exit(3); /*ooo*/
+		/*NOTREACHED*/
 	    }
 	    break;
 	case 's':	/* new file suffix */
@@ -479,18 +549,21 @@ parse_args(int argc, char *argv[])
 		    fprintf(stderr,
 			    "%s: -s suffux must only be [A-Za-z0-9._+,-]\n",
 			    program);
-		    exit(8);
+		    exit(3); /*ooo*/
+		    /*NOTREACHED*/
 		}
 	    }
 	    break;
 	default:
-	    fprintf(stderr, "usage: %s %s\n", program, cmdline);
-	    exit(9);
+	    pr_usage(stderr);
+	    exit(3); /*ooo*/
+	    /*NOTREACHED*/
 	}
     }
     if (trunc && (del_dest || del_src)) {
 	fprintf(stderr, "%s: -T conflicts with -d and -D", program);
-	exit(10);
+	exit(3); /*ooo*/
+	/*NOTREACHED*/
     }
 
     /*
@@ -498,8 +571,9 @@ parse_args(int argc, char *argv[])
      */
     if (optind+2 != argc) {
 	fprintf(stderr, "%s: required to args are missing\n", program);
-	fprintf(stderr, "usage: %s %s\n", program, cmdline);
-	exit(11);
+	pr_usage(stderr);
+	exit(3); /*ooo*/
+	/*NOTREACHED*/
     } else {
 	src = argv[optind];
 	dest = argv[optind+1];
@@ -588,15 +662,15 @@ debug(char *fmt, ...)
  *
  * given:
  *	from_fd		open file descriptor to copy from
- * 	src_buf		pointer to fstat of from_fd
- * 	from		name of file being copied from
- * 	new_to		temp filename in same directory as to
- * 	to		filename being copied into
+ *	src_buf		pointer to fstat of from_fd
+ *	from		name of file being copied from
+ *	new_to		temp filename in same directory as to
+ *	to		filename being copied into
  *
  * We copy into a temp filename and then rename it to the destination.
  * This means that the to file will never contain a partial copy
- * of the from file.  The to file will either have its origianl contents
- * or the contents of the from file ... nothing inbetween.
+ * of the from file.  The to file will either have its original contents
+ * or the contents of the from file ... nothing in between.
  *
  * This function also sets the modification time of the to file
  * to match the from file.
@@ -604,15 +678,15 @@ debug(char *fmt, ...)
 static void
 copy_file(int from_fd, struct stat *src_buf, char *from, char *new_to, char *to)
 {
-    int to_fd = -1;	/* new_to open file descriptor */
-    off_t offset;	/* starting offset of transfer */
-    size_t count;	/* bytes left to transfer */
-    ssize_t written;	/* bytes written */
+    int to_fd = -1;		/* new_to open file descriptor */
+    size_t count;		/* bytes left to transfer */
+    ssize_t written;		/* bytes written */
     struct utimbuf timebuf;	/* access and modification time to set */
-#if !defined(HAVE_SENDFILE)
-    int readcnt;	/* bytes read from from */
-    int writecnt;	/* bytes written to to */
-    char buf[BUFSIZ];	/* I/O buffer */
+#if defined(HAVE_SENDFILE)
+    off_t offset = (off_t)0;	/* starting offset of transfer */
+#else
+    int readcnt;		/* bytes read from from */
+    char buf[BUFSIZ+1];		/* I/O buffer */
 #endif
 
     /*
@@ -620,11 +694,11 @@ copy_file(int from_fd, struct stat *src_buf, char *from, char *new_to, char *to)
      */
     if (from_fd < 0) {
 	fprintf(stderr, "%s: copy_file from_fd < 0: %d\n", program, from_fd);
-	exit(12);
+	exit(13);
     }
     if (src_buf == NULL || from == NULL || new_to == NULL || to == NULL) {
 	fprintf(stderr, "%s: called with NULL ptr\n", program);
-	exit(13);
+	exit(14);
     }
 
     /*
@@ -641,11 +715,11 @@ copy_file(int from_fd, struct stat *src_buf, char *from, char *new_to, char *to)
     /*
      * send data from the from file to the to file :-)
      */
-    offset = 0;
     count = (off_t)src_buf->st_size;
     if (count > 0) {
 	debug("copying %lld octets %s ==> %s", (long long)count, from, new_to);
 	do {
+
 #if defined(HAVE_SENDFILE)
 	    /*
 	     * transfer by sendfile
@@ -661,7 +735,7 @@ copy_file(int from_fd, struct stat *src_buf, char *from, char *new_to, char *to)
 		(void) unlink(new_to);
 		return;
 	    } else if (written == 0) {
-		debug("sendfile transfered 0 octets");
+		debug("sendfile transferred 0 octets");
 		(void) close(to_fd);
 		(void) unlink(new_to);
 		return;
@@ -669,11 +743,12 @@ copy_file(int from_fd, struct stat *src_buf, char *from, char *new_to, char *to)
 
 	    /* determine next count needed, if any */
 	    count = src_buf->st_size - offset;
+
 #else
+
 	    /*
 	     * transfer by read/write buffer
 	     */
-	    written = 0;
 	    errno = 0;
 	    /* read a buffer */
 	    readcnt = read(from_fd, buf, BUFSIZ);
@@ -711,8 +786,11 @@ copy_file(int from_fd, struct stat *src_buf, char *from, char *new_to, char *to)
 
 	    /* note how much data is left to transfer */
 	    count -= written;
+
 #endif
+
 	} while (count > 0);
+
     } else {
 	debug("src is empty, creating empty %s", new_to);
     }
