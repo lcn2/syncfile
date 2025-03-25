@@ -749,6 +749,7 @@ copy_file(int from_fd, struct stat *src_buf, char *from, char *new_to, char *to)
 	    /*
 	     * transfer by read/write buffer
 	     */
+	    count = 0;
 	    errno = 0;
 	    /* read a buffer */
 	    readcnt = read(from_fd, buf, BUFSIZ);
