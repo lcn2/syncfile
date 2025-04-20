@@ -21,18 +21,18 @@ sudo make install clobber
 ```
 
 
-## Example
+# Example
 
 Wait until the file `inbound` exists, and when it does, cause `outbound` to have the same contents.
 
 ```sh
-/usr/local/bin/syncfile -n 0 inbound outbound
+$ /usr/local/bin/syncfile -n 0 inbound outbound
 ```
 
 
 # To use
 
-```sh
+```
 /usr/local/bin/syncfile [-h] [-v] [-V] [-f] [-d] [-D] [-T] [-c] [-t secs] [-n cnt] [-s suffix] src dest
 
 	-h	   print this message
