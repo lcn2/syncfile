@@ -147,7 +147,7 @@ main(int argc, char *argv[])
 	debug("sync from: %s", src);
 	debug("sync to: %s", dest);
 	debug("check interval: %f sec", interval);
-	debug("number of checks: %d", count);
+	debug("number of checks: %ld", count);
 	if (trunc) {
 	    debug("truncate dest if src is missing: %d", del_dest);
 	    debug("truncate src if dest is missing: %d", del_src);
@@ -777,7 +777,7 @@ copy_file(int from_fd, struct stat *src_buf, char *from, char *new_to, char *to)
 		    (void) unlink(new_to);
 		    return;
 		} else if (written != readcnt) {
-		    debug("wrote only %d out of %s to %s: %s",
+		    debug("wrote only %ld out of %ld to %s: %s",
 			  written, readcnt, new_to, strerror(errno));
 		    (void) close(to_fd);
 		    (void) unlink(new_to);

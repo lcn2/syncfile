@@ -36,6 +36,7 @@
 
 CC= cc
 CHMOD= chmod
+CMP= cmp
 CP= cp
 ID= id
 INSTALL= install
